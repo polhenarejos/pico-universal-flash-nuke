@@ -10,8 +10,13 @@ env:
   # Customize the CMake build type here (Release, Debug, RelWithDebInfo, etc.)
   BUILD_TYPE: Release
 
+permissions:
+  contents: write
+
 jobs:
   build:
+    permissions:
+      contents: write
     name: ${{matrix.name}}
     strategy:
       matrix:
@@ -27,15 +32,16 @@ jobs:
       PICO_SDK_PATH: $GITHUB_WORKSPACE/pico-sdk
       PIMORONI_PICO_LIBS: $GITHUB_WORKSPACE/pimoroni-pico
       RELEASE_FILE: ${{github.event.repository.name}}-${{github.event.release.tag_name}}
+      SIGN_RP2350: ${{ github.event_name == 'release' && secrets.PRIVATE_KEY_B64 != '' }}
 
     steps:
     - name: Compiler Cache
       uses: actions/cache@v5
       with:
         path: /home/runner/.ccache
-        key: ccache-cmake-${{github.ref}}-${{matrix.board}}-${{github.sha}}
+        key: ccache-cmake-${{github.ref}}-${{matrix.cache-key}}-${{github.sha}}
         restore-keys: |
-          ccache-cmake-${{github.ref}}-${{matrix.board}}
+          ccache-cmake-${{github.ref}}-${{matrix.cache-key}}
           ccache-cmake-${{github.ref}}
           ccache-cmake
 
@@ -65,14 +71,17 @@ jobs:
       run: cmake -E make_directory ${{runner.workspace}}/build-rp2350
 
     - name: RP2350 - Restore private key
+      if: env.SIGN_RP2350 == 'true'
       run: |
-        echo "${{ secrets.PRIVATE_KEY_B64 }}" | base64 -d > private.pem
-        chmod 600 private.pem
+        echo "${{ secrets.PRIVATE_KEY_B64 }}" | base64 -d > ${{runner.workspace}}/private.pem
+        chmod 600 ${{runner.workspace}}/private.pem
 
     - name: RP2350 - Configure CMake
       shell: bash
       working-directory: ${{runner.workspace}}/build-rp2350
-      run: cmake $GITHUB_WORKSPACE/src ${{matrix.cmake-args}} -DPICO_BOARD=pico2 -DSECURE_BOOT_PKEY=../private.pem
+      run: >-
+        cmake $GITHUB_WORKSPACE/src ${{matrix.cmake-args}} -DPICO_BOARD=pico2
+        ${{ env.SIGN_RP2350 == 'true' && format('-DSECURE_BOOT_PKEY={0}/private.pem', runner.workspace) || '' }}
 
     - name: RP2350 - Build
       working-directory: ${{runner.workspace}}/build-rp2350
@@ -83,7 +92,8 @@ jobs:
         ccache --show-stats || true
 
     - name: RP2350 - Delete private key
-      run: rm private.pem
+      if: always() && env.SIGN_RP2350 == 'true'
+      run: rm -f ${{runner.workspace}}/private.pem
 
     - name: RP2040 - Create Build Environment
       run: cmake -E make_directory ${{runner.workspace}}/build-rp2040
@@ -97,7 +107,7 @@ jobs:
       working-directory: ${{runner.workspace}}/build-rp2040
       shell: bash
       run: |
-        ccache --zero-stats || truef
+        ccache --zero-stats || true
         cmake --build . --config $BUILD_TYPE -j 2
         ccache --show-stats || true
 
