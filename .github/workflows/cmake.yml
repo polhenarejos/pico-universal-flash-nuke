@@ -64,10 +64,15 @@ jobs:
     - name: RP2350 - Create Build Environment
       run: cmake -E make_directory ${{runner.workspace}}/build-rp2350
 
+    - name: RP2350 - Restore private key
+      run: |
+        echo "${{ secrets.PRIVATE_KEY_B64 }}" | base64 -d > private.pem
+        chmod 600 private.pem
+
     - name: RP2350 - Configure CMake
       shell: bash
       working-directory: ${{runner.workspace}}/build-rp2350
-      run: cmake $GITHUB_WORKSPACE/src ${{matrix.cmake-args}} -DPICO_BOARD=pico2
+      run: cmake $GITHUB_WORKSPACE/src ${{matrix.cmake-args}} -DPICO_BOARD=pico2 -DSECURE_BOOT_PKEY=../private.pem
 
     - name: RP2350 - Build
       working-directory: ${{runner.workspace}}/build-rp2350
@@ -76,6 +81,9 @@ jobs:
         ccache --zero-stats || true
         cmake --build . --config $BUILD_TYPE -j 2
         ccache --show-stats || true
+
+    - name: RP2350 - Delete private key
+      run: rm private.pem
 
     - name: RP2040 - Create Build Environment
       run: cmake -E make_directory ${{runner.workspace}}/build-rp2040
